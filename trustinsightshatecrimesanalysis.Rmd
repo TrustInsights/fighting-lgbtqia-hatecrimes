@@ -1,0 +1,174 @@
+---
+title: "R Notebook for Hate Crimes Analysis Data Preparation :: TrustInsights.ai"
+output: html_notebook
+---
+
+This is a data preparation script necessary to handle LGBTQIA+ hate crime data along with supplementary data for public use. The intended purpose of this data is to make it easier for those researching hate crimes against LGBTQIA+ populations to have a single, normalized table of data to work with for correlation, modeling, etc.
+
+The source data is sourced from a variety of places; each source is noted and hyperlinked in the notebook for independent verification.
+
+This code is released under the [GNU General Public License](https://www.gnu.org/licenses/gpl-3.0.en.html). Absolutely no warranty or support of any kind is included. Use at your own risk.
+
+### Prerequisites
+
+```{r}
+library(here)
+library(janitor)
+library(tidyverse)
+library(summarytools)
+```
+
+### Hate Crimes Data File
+
+The data from this file is sourced from the [FBI Uniform Crime Reports, 2017](https://ucr.fbi.gov/hate-crime/2017). FBI data is really, really messy. In order to collate this information, you have to download each state's report as individual spreadsheet files and manually copy and paste the summary data into a single table. 
+
+Note that according to the FBI, the state of Hawaii does not participate in any hate crime reporting, so all Hawaii data will be zeroes.
+
+We'll also feature engineer this table to sum up both sexuation orientation and gender identity as an "LGBTQIA+ Hate Crime" column, plus provide a percentage of all hate crimes vs. LGBTQIA+ Hate Crimes.
+
+```{r}
+hatecrimesdf <- read_csv("hatecrimesgeo.csv") %>%
+  clean_names() %>%
+  mutate(lgbtqhatecrimes = sexual_orientation + gender_identity) %>%
+  mutate(
+    percentagelgbtqcrimes = lgbtqhatecrimes / (
+      race_ethnicity_ancestry + religion + sexual_orientation + disability + gender + gender_identity
+    )
+  )
+```
+
+### State Population Data and Reporting
+
+In order to make any kind of decisions about frequency, we need to take into account the overall population, number of police agencies, etc. This data file also comes from the FBI.
+
+We'll also feature engineer this table to add a percentage of agencies reporting incidents. This is important because underreporting is a known issue with hate crimes in particular.
+
+```{r}
+hatereportingdf <- read_csv("hatecrimereporting.csv") %>%
+  clean_names() %>%
+  mutate(agencyreportingpercentage = agencies_submitting_incident_reports / number_of_participating_agencies)
+```
+
+### LGBTQIA+ Population Estimates
+
+To better understand reporting of crimes, we need to know the density of the population. What percentage of the population identifies as LGBT per state? This data comes from the [Movement Advancement Project](http://www.lgbtmap.org/equality-maps/lgbt_populations) and is 2018 data, so slightly newer than the FBI data.
+
+We'll feature engineer the character vectors to become numbers.
+
+```{r}
+lgbtpopdf <- read_csv("maplgbtpopulations.csv") %>%
+  clean_names() %>%
+  mutate(lgbt_population_density = as.numeric(sub("%", "", lgbt_population_density)) /
+           100) %>%
+  mutate(percent_of_lgbt_individuals_raising_children = as.numeric(sub(
+    "%", "", percent_of_lgbt_individuals_raising_children
+  )) / 100) %>%
+  mutate(percent_of_same_sex_couples_raising_children = as.numeric(sub(
+    "%", "", percent_of_same_sex_couples_raising_children
+  )) / 100)
+```
+
+### LGBTQIA+ Legal Protection
+
+To see the big picture, let's look at which states offer protection against hate crimes for both sexual orientation and gender identity. This data also comes from the [Movement Advancement Project](http://www.lgbtmap.org/equality-maps/hate_crime_laws).
+
+For machine learning purposes, we'll also one-hot encode these values (in the source data as Y/N fields) as 0s and 1s.
+
+```{r}
+legaldf <- read_csv("lgbtqlegalprotection.csv") %>%
+  clean_names() %>%
+  mutate(
+    sexual_orientation_protected_num = case_when(
+      sexual_orientation_protected == "Y" ~ 1,
+      sexual_orientation_protected == "N" ~ 0
+    )
+  ) %>%
+  mutate(
+    gender_identity_protected_num = case_when(
+      gender_identity_protected == "Y" ~ 1,
+      gender_identity_protected == "N" ~ 0
+    )
+  )
+```
+
+### Conversations About Hate Crimes
+
+One area that's extremely difficult to measure is just how bad underreporting of hate crimes is. How do we determine the prevalence of anti-LGBTQIA+ hate crimes, especially in places where no legal protections exist and agencies aren't required to report such data to the FBI?
+
+One potential way to assess this would be to bring in social media conversations and content, geographically located, about specific hate crimes. We pulled data from the [Talkwalker](https://www.talkwalker.com) media monitoring platform to assess what kinds of news reports might exist about hate crimes; this query filters out high-frequency but largely irrelevant content about hate crimes in general, but not specific reports:
+
+> (("LGBT" OR "LGBTQ" OR "gay" OR "bisexual" OR "transgender" OR "lesbian") AND ("Hate Crime" OR "Attacked" OR "attack" OR "assault" OR "murder" OR "rape" OR "charged" OR "indicted" OR "guilty")  AND ("police" OR "law enforcement"))  AND NOT ("Trump" OR "Smollett" OR "Putin" OR "Obama" OR "@realdonaldtrump" OR "Pence" OR "burt reynolds" OR "rami malek" OR "abortion" OR "bolsonaro" OR "Congress")
+
+Note that this data source's time frame is July 5, 2018 - June 6, 2019 owing to limitations in what social tools can extract from social APIs.
+
+Let's bring this table in as well.
+
+```{r}
+socialdf <- read_csv("talkwalkerhatecrimementions.csv") %>%
+  clean_names()
+```
+
+One anomaly worth considering is that even with filtering, a substantial amount of content and conversation will always come from sources located in the District of Columbia.
+
+What would you use this data for? Like the data about number of police agencies reporting, social media data could be used to weight and adjust the number of raw hate crimes reported in a region.
+
+### News About Hate Crimes
+
+To further assist in counterbalancing the underreporting of hate crimes, we also extracted news articles from Google's BigQuery database and the [GDELT project](https://www.gdeltproject.org/) that were tagged with a defined location within the United States, using the same query (minus SQL syntax variations) as our social media query:
+
+> select distinct sourceurl, sqldate, Actor1Geo_FullName, Actor2Geo_FullName from `gdelt-bq.gdeltv2.events` where (sourceurl like '%hate-crime%' OR  sourceurl like '%rape%' OR sourceurl like '%murder%' OR sourceurl like '%attack%' OR sourceurl like '%assault%' OR sourceurl like '%charged%' OR sourceurl like '%indicted%' OR sourceurl like '%guilty%') and (sourceurl like '%lgbt%' OR sourceurl like '%gay%' OR sourceurl like '%gay%' OR sourceurl like '%bisexual%' or sourceurl like '%transgender%' or sourceurl like '%lesbian%') and (sourceurl NOT LIKE '%trump%' AND sourceurl NOT LIKE '%Trump%' AND sourceurl NOT LIKE '%pence%' AND sourceurl NOT LIKE '%smollett%' AND sourceurl NOT LIKE '%obama%' AND sourceurl NOT LIKE '%putin%' AND sourceurl NOT LIKE '%abortion%' AND sourceurl NOT LIKE '%malek%' AND sourceurl NOT LIKE '%congress%' AND sourceurl NOT LIKE '%bolsonaro%' AND sourceurl NOT LIKE '%abbott%') AND (Actor1Geo_FullName like '%, United States%' OR Actor2Geo_FullName like '%, United States%') and (sqldate >= 20170101 and sqldate <= 20171231)
+
+This datafile comes in with individual lines including dates and such, so let's clean and prepare it. It starts out with 2,782 lines, which need to be consolidated down to counts in order to be merged into our main table later on. The end result dataframe will be a list of states and the number of stories in 2017 for that state.
+
+```{r}
+newsdf <- read_csv("googlenewshatearticles2017.csv") %>% 
+  clean_names() %>% 
+  arrange(state)
+
+newsdf$state <- as.factor(newsdf$state)
+
+newsstoriesdf <- newsdf %>% 
+  transmute(state) %>%
+  group_by(state) %>%
+  tally() %>%
+  rename(news_stories_count = n)
+
+```
+
+Note that any organization that wishes to make use of this data can manually inspect and discard individual news URLs in the source file, should they be so inclined.
+
+## Putting the Pieces Together
+
+We now have six different tables from different data sources. While valuable individually, we could do much more if we had them all together. So let's do that using a series of joins.
+
+We'll also write a copy of the table as a CSV for easy import into software like Excel, Google Sheets, etc. so that any citizen analyst can pick up the table and work with a clean, consolidated dataset.
+
+```{r}
+joindf <- left_join(hatecrimesdf, hatereportingdf, by = "state")
+joindf <- left_join(joindf, lgbtpopdf, by = "state")
+joindf <- left_join(joindf, legaldf, by = "state")
+joindf <- left_join(joindf, socialdf, by = "state")
+joindf <- left_join(joindf, newsstoriesdf, by = "state")
+```
+
+### Feature Engineering
+
+Because high population states inevitable skew absolute numbers of anything, we'll want to account for that by doing a calculation of LGBTQIA-specific hate crimes per capita. We can do this now because we've joined all our data from disparate tables together. From the MAP data, we have the LGBTQIA+ adult population, and we have the LGBTQ hate crimes data from the FBI.
+
+We'll also engineer a feature for LGBTQIA+ hate crimes per capita for LGBTQIA+ populations. This insight, a ratio of hate crimes per LGBTQIA+ adult person, helps us understand the level of intensity of hate crimes against the LGBTQIA+ population specifically.
+
+```{r}
+joindf <- joindf %>% 
+  mutate(lgbtqcrimespercapita = lgbtqhatecrimes / population_covered) %>%
+  mutate(lgbtqcrimesperlgbtqcapita = lgbtqhatecrimes / lgbt_adult_population)
+```
+
+What aren't we doing in feature engineering? There are any number of combinations and assumptions we could write into the code, such as a weight or estimator of the actual number of hate crimes, based on news reports, social media posts, etc. but those assumptions require independent verification, which is outside the scope of this project.
+
+Let's now save our data.
+
+```{r}
+write_csv(joindf, "hatecrimessummarytable.csv")
+```
+
+This data file is what a citizen analyst could pick up and use to make further analysis.
