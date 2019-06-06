@@ -123,7 +123,7 @@ This datafile comes in with individual lines including dates and such, so let's 
 ```{r}
 newsdf <- read_csv("googlenewshatearticles2017.csv") %>% 
   clean_names() %>% 
-  arrange(state)
+  arrange(state) %>% distinct()
 
 newsdf$state <- as.factor(newsdf$state)
 
