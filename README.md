@@ -11,3 +11,11 @@ I recently took a look at one such data problem. As I write this, it's Pride Mon
 One would think, in this era of perpetual surveillance and instant communication, that this would be a simple, easily-obtained answer. Quite the contrary: in fact, the answer requires a lot of data detective work. However, if we do the preparatory work, the end result should be a dataset that any citizen analyst could pick up and use within everyday spreadsheet software to perform their own analysis.
 
 Let's walk through the process, including some functional code you're welcome to copy and paste (or [grab the entire code/notebook from our Github repository](https://github.com/TrustInsights/fighting-lgbtqia-hatecrimes)) to find answers.
+
+## Repository Contents
+
+This is a data preparation script necessary to handle LGBTQIA+ hate crime data along with supplementary data for public use. The intended purpose of this data is to make it easier for those researching hate crimes against LGBTQIA+ populations to have a single, normalized table of data to work with for correlation, modeling, etc.
+
+The source data is sourced from a variety of places; each source is noted and hyperlinked in the notebook for independent verification.
+
+This code is released under the [GNU General Public License](https://www.gnu.org/licenses/gpl-3.0.en.html). Absolutely no warranty or support of any kind is included. Use at your own risk.
